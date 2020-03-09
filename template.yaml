@@ -1,0 +1,204 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Pinpoint Blog
+Parameters:
+  maxTry:
+    Type: Number
+    Default: 2
+  longCode:
+    Type: String
+    Default: ''
+  language:
+    Type: String
+    Default: en-US
+  pollyVoice:
+    Type: String
+    Default: Joanna
+  retryDelaySeconds:
+    Type: Number
+    Default: 60
+Resources:
+  BootstrapCustomResource:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt BlogBootstrapFunction.Arn
+  CallGenerator:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: nodejs12.x
+      CodeUri: callgenerator/
+      Handler: index.handler
+      Role: !GetAtt BlogFunctionIAMRole.Arn
+      AutoPublishAlias: "live"
+      Environment:
+        Variables:
+          LANGUAGE: !Ref language
+          VOICE: !Ref pollyVoice
+          LONG_CODE: !Ref longCode
+          CONFIG_SET_NAME: !Ref AWS::StackName
+  RetryCallGenerator:
+    Type: AWS::Serverless::Function
+    DependsOn:
+      - BlogSqsQueue
+    Properties:
+      Runtime: nodejs12.x
+      CodeUri: retrycallgenerator/
+      Handler: index.handler
+      Role: !GetAtt BlogFunctionIAMRole.Arn
+      AutoPublishAlias: "live"
+      Events:
+        MySQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt BlogSqsQueue.Arn
+            BatchSize: 10
+            Enabled: true
+      Environment:
+        Variables:
+          MAX_TRY: !Ref maxTry
+          LANGUAGE: !Ref language
+          VOICE: !Ref pollyVoice
+          LONG_CODE: !Ref longCode
+          CONFIG_SET_NAME: !Ref AWS::StackName
+          CALL_GENERATOR_LAMBDA_ARN: !Ref CallGenerator
+  BlogDynamoDBTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      PrimaryKey:
+        Name: MessageId
+        Type: String
+      ProvisionedThroughput:
+        ReadCapacityUnits: 2
+        WriteCapacityUnits: 2
+      TableName: call_attempts
+  BlogSqsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      DelaySeconds: !Ref retryDelaySeconds
+  BlogSqsQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref BlogSqsQueue
+      PolicyDocument:
+        Statement:
+          Effect: Allow
+          Principal: "*"
+          Action: "sqs:*"
+          Resource: "*"
+          Condition:
+            ArnEquals:
+              "aws:SourceArn": !Ref BlogSnsTopic
+  BlogSnsTopic:
+      Type: AWS::SNS::Topic
+  BlogSqsToSnsSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Endpoint: !GetAtt BlogSqsQueue.Arn
+      Protocol: sqs
+      RawMessageDelivery: true
+      TopicArn: !Ref BlogSnsTopic
+  BlogBootstrapFunction:
+    Type: AWS::Lambda::Function
+    DependsOn:
+      - BlogSnsTopic
+    Properties:
+      Runtime: nodejs12.x
+      Handler: index.handler
+      Role: !GetAtt BlogFunctionIAMRole.Arn
+      Environment:
+        Variables:
+          SNS_ARN: !Ref BlogSnsTopic
+          CONFIG_SET_NAME: !Ref AWS::StackName
+      Code:
+        ZipFile: |
+           var response = require('cfn-response');
+           var AWS = require('aws-sdk');
+           exports.handler = function(event, context) {
+             var responseData = {Value: 5};
+             var pinpointsmsvoice = new AWS.PinpointSMSVoice();
+             if(event.RequestType=='Create'){
+                var params={ConfigurationSetName:process.env.CONFIG_SET_NAME};
+                console.log("Creating configuration set:" + process.env.CONFIG_SET_NAME);
+                pinpointsmsvoice.createConfigurationSet(params, function (err, data) {
+                if (err) {
+                    console.log(err, err.stack);
+                    response.send(event, context, response.FAILED, responseData);
+                   }
+                  else{
+                    console.log("success" + data); // successful response
+                    var eventParams = {
+                      ConfigurationSetName: process.env.CONFIG_SET_NAME,
+                      EventDestinationName: process.env.CONFIG_SET_NAME,
+                      EventDestination: {
+                        Enabled: true,
+                        MatchingEventTypes: ['ANSWERED'],
+                        SnsDestination: {TopicArn:process.env.SNS_ARN}
+                      }
+                    };
+                  pinpointsmsvoice.createConfigurationSetEventDestination(eventParams, function(err, data) {
+                   if (err) {
+                     console.log(err, err.stack); // an error occurred
+                     response.send(event, context, response.ERROR, responseData);
+                   }
+                   else console.log('success: ' + data); // successful response
+                  });
+                  response.send(event, context, response.SUCCESS, responseData);
+                  }
+                });
+               }//create
+
+               if(event.RequestType=='Delete'){
+                console.log("Deleting configuration set: " + process.env.CONFIG_SET_NAME);
+                var params={ConfigurationSetName:process.env.CONFIG_SET_NAME};
+                pinpointsmsvoice.deleteConfigurationSet(params, function (err, data) {
+                if (err) {
+                    console.log(err, err.stack);
+                    response.send(event, context, response.FAILED, responseData);
+                   }
+                  else{
+                    console.log('deleted:' + data); // successful response
+                    response.send(event, context, response.SUCCESS, responseData);
+                  }
+                });
+               }
+           };
+  BlogFunctionIAMRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: BlogPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Sid: PinpointAccess
+                Effect: Allow
+                Action: 'sms-voice:*'
+                Resource: '*'
+              - Sid: CloudwatchLogsAccess
+                Effect: Allow
+                Action: 'logs:*'
+                Resource: '*'
+              - Sid: SQSAccess
+                Effect: Allow
+                Action: 'sqs:*'
+                Resource: '*'
+              - Sid: DynamoDBAccess
+                Effect: Allow
+                Action: 'dynamodb:*'
+                Resource: '*'
+              - Sid: LambdatoLambdaAccess
+                Effect: Allow
+                Action: 'lambda:*'
+                Resource: '*'
