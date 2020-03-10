@@ -1,7 +1,6 @@
 ## Amazon Pinpoint Call Retry
 
-Retrying Undelivered Voice Messages with Amazon Pinpoint
-
+Retrying Undelivered Voice Messages with Amazon Pinpoint. Please refer to the accompanying AWS Blog post for architecture details.
 
 ## License Summary
 This sample code is made available under a modified MIT-0 license. See the LICENSE file.
@@ -11,8 +10,6 @@ This package requires AWS Serverless Application Model (AWS SAM) Command Line In
 
 ## Prerequisites
 This serverless application requires that you have an AWS Pinpoint project set up, and configured with voice support and a long code. You will need to specify the long code in the template.yaml file before deploing this package. The Long code must be owned by the same account as Pinpoint and your SAM package are deployed in.
-
-Optionally update the language code, and the voice to be used to generate the speach via AWS Polly. The list of Polly voices can be found here: https://docs.aws.amazon.com/polly/latest/dg/voicelist.html
 
 ## Installing dependencies
 Use npm install in the callgenerator and retrycallgenerator directories to install any required packages prior to packaging and deploying this SAM application.
