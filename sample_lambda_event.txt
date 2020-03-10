@@ -1,0 +1,6 @@
+{
+  "Message": "<speak>Thank you for visiting the AWS <emphasis>Messaging and Targeting Blog</emphasis>.</speak>",
+  "PhoneNumber": "DESTINATION_PHONE_NUMBER",
+  "RetryCount": 0
+}
+
