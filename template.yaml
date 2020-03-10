@@ -133,7 +133,7 @@ Resources:
                       EventDestinationName: process.env.CONFIG_SET_NAME,
                       EventDestination: {
                         Enabled: true,
-                        MatchingEventTypes: ['ANSWERED'],
+                        MatchingEventTypes: ['BUSY','FAILED','NO_ANSWER'],
                         SnsDestination: {TopicArn:process.env.SNS_ARN}
                       }
                     };
