@@ -76,6 +76,7 @@ Resources:
     Type: AWS::SQS::Queue
     Properties:
       DelaySeconds: !Ref retryDelaySeconds
+      SqsManagedSseEnabled: true
   BlogSqsQueuePolicy:
     Type: AWS::SQS::QueuePolicy
     Properties:
